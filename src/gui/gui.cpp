@@ -45,8 +45,8 @@
 #include "hardware/powermgm.h"
 #include "hardware/display.h"
 
-LV_IMG_DECLARE(bg2)
 
+ LV_IMG_DECLARE(casio1) // there are 4 casio options, and one black
 /**
  * Create a demo application
  */
@@ -55,9 +55,9 @@ void gui_setup(void)
     lv_coord_t hres = lv_disp_get_hor_res(NULL);
     lv_coord_t vres = lv_disp_get_ver_res(NULL);
 
-    //Create wallpaper
+    // Create wallpaper
     lv_obj_t *img_bin = lv_img_create( lv_scr_act() , NULL);  /*Create an image object*/
-    lv_img_set_src(img_bin, &bg2 );
+    lv_img_set_src(img_bin, &casio1 ); // there are 4 casio options, and one black
     lv_obj_set_width( img_bin, hres );
     lv_obj_set_height( img_bin, vres );
     lv_obj_align(img_bin, NULL, LV_ALIGN_CENTER, 0, 0);

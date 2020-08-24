@@ -42,6 +42,12 @@ void note_tile_setup( void ) {
     lv_style_set_text_opa( &notestyle, LV_OBJ_PART_MAIN, LV_OPA_30);
     lv_style_set_text_font( &notestyle, LV_STATE_DEFAULT, &Ubuntu_72px);
 
+    // use a black bg
+    lv_style_set_bg_color( &notestyle, LV_OBJ_PART_MAIN, LV_COLOR_BLACK);
+    lv_style_set_bg_opa( &notestyle, LV_OBJ_PART_MAIN, LV_OPA_100);
+    lv_style_set_border_width( &notestyle, LV_OBJ_PART_MAIN, 0);
+    // lv_obj_add_style( &appstyle, LV_OBJ_PART_MAIN, style);
+
     notelabel = lv_label_create( note_cont, NULL);
     lv_label_set_text( notelabel, "note");
     lv_obj_reset_style_list( notelabel, LV_OBJ_PART_MAIN );
