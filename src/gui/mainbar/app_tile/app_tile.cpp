@@ -39,17 +39,6 @@ void app_tile_setup( void ) {
         app_cont[ tiles ] = mainbar_get_tile_obj( app_tile_num[ tiles ] );
     }
 
-    // lv_style_copy( &appstyle, style);
-    // lv_style_set_text_opa( &appstyle, LV_OBJ_PART_MAIN, LV_OPA_30);
-    // lv_style_set_text_font( &appstyle, LV_STATE_DEFAULT, &Ubuntu_72px);
-    
-    // // use a black bg
-    // lv_style_set_bg_color( &appstyle, LV_OBJ_PART_MAIN, LV_COLOR_BLACK);
-    // lv_style_set_bg_opa( &appstyle, LV_OBJ_PART_MAIN, LV_OPA_100);
-    // lv_style_set_border_width( &appstyle, LV_OBJ_PART_MAIN, 0);
-    // // lv_obj_add_style( &appstyle, LV_OBJ_PART_MAIN, style);
-    // lv_obj_add_style( app_cont, LV_OBJ_PART_MAIN, &appstyle );
-
     lv_style_copy( &app_style, mainbar_get_style() );
 
     for ( int app = 0 ; app < MAX_APPS_ICON ; app++ ) {
