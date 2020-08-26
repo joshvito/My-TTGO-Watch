@@ -26,6 +26,7 @@
 #include "gui/mainbar/mainbar.h"
 #include "gui/mainbar/setup_tile/time_settings/time_settings.h"
 #include "main_tile.h"
+#include "gui/theme/theme.h"
 
 static lv_obj_t *main_cont = NULL;
 static lv_obj_t *clock_cont = NULL;
@@ -43,20 +44,17 @@ LV_FONT_DECLARE(Ubuntu_72px);
 LV_FONT_DECLARE(Ubuntu_16px);
 
 lv_task_t * main_tile_task;
-LV_IMG_DECLARE(casio1) // there are 4 casio options, and one black
 
 void main_tile_update_task( lv_task_t * task );
 void main_tile_align_widgets( void );
 
-void main_tile_setup( void ) {
+void main_tile_setup() {
     main_tile_num = mainbar_add_tile( 0, 0 );
     main_cont = mainbar_get_tile_obj( main_tile_num );
     style = mainbar_get_style();
-    
-    lv_style_copy( &timestyle, style);
-    lv_style_set_text_font( &timestyle, LV_STATE_DEFAULT, &Ubuntu_72px);
-    lv_style_set_text_color(&timestyle, LV_OBJ_PART_MAIN, LV_COLOR_BLACK); // for casio bg, time needs to be dark
-    // lv_style_set_text_color(&timestyle, LV_OBJ_PART_MAIN, LV_COLOR_WHITE); // for casio bg, time needs to be dark
+
+    const lv_style_t * theme_timestyle = theme_get_time_style();
+    lv_style_copy( &timestyle, theme_timestyle);
 
     lv_style_copy( &datestyle, style);
     lv_style_set_text_font( &datestyle, LV_STATE_DEFAULT, &Ubuntu_16px);

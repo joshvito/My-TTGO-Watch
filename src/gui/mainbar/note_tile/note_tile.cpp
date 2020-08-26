@@ -23,30 +23,27 @@
 
 #include "gui/mainbar/mainbar.h"
 #include "note_tile.h"
+#include "gui/theme/theme.h"
+
+LV_FONT_DECLARE(Ubuntu_72px);
 
 static lv_obj_t *note_cont = NULL;
 static lv_obj_t *notelabel = NULL;
+static theme_config_t * theme_config = NULL;
 
 static lv_style_t *style;
 static lv_style_t notestyle;
 
-LV_FONT_DECLARE(Ubuntu_72px);
-LV_FONT_DECLARE(Ubuntu_16px);
-
-void note_tile_setup( void ) {
-
+void note_tile_setup() {
+    theme_config = theme_get_config();
     note_cont = mainbar_get_tile_obj( mainbar_add_tile( 0, 1 ) );
-    style = mainbar_get_style();
+
+    style = theme_get_style();
 
     lv_style_copy( &notestyle, style);
     lv_style_set_text_opa( &notestyle, LV_OBJ_PART_MAIN, LV_OPA_30);
     lv_style_set_text_font( &notestyle, LV_STATE_DEFAULT, &Ubuntu_72px);
-
-    // use a black bg
-    lv_style_set_bg_color( &notestyle, LV_OBJ_PART_MAIN, LV_COLOR_BLACK);
-    lv_style_set_bg_opa( &notestyle, LV_OBJ_PART_MAIN, LV_OPA_100);
-    lv_style_set_border_width( &notestyle, LV_OBJ_PART_MAIN, 0);
-    // lv_obj_add_style( &appstyle, LV_OBJ_PART_MAIN, style);
+    lv_obj_add_style(note_cont, LV_OBJ_PART_MAIN, &notestyle );
 
     notelabel = lv_label_create( note_cont, NULL);
     lv_label_set_text( notelabel, "note");
