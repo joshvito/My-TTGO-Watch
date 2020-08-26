@@ -24,6 +24,7 @@
 
 #include "gui/mainbar/mainbar.h"
 #include "hardware/motor.h"
+#include "gui/theme/theme.h"
 
 lv_setup_entry_t setup_entry[ MAX_SETUP_ICON ];
 
@@ -32,13 +33,13 @@ uint32_t setup_tile_num[ MAX_SETUP_TILES ];
 lv_style_t setup_style;
 
 void setup_tile_setup( void ) {
-
+    lv_style_copy( &setup_style, theme_get_style() );
+    
     for ( int tiles = 0 ; tiles < MAX_SETUP_TILES ; tiles++ ) {
         setup_tile_num[ tiles ] = mainbar_add_tile( 1 + tiles , 1 );
         setup_cont[ tiles ] = mainbar_get_tile_obj( setup_tile_num[ tiles ] );
+        lv_obj_add_style(setup_cont[ tiles ], LV_OBJ_PART_MAIN, &setup_style );
     }
-
-    lv_style_copy( &setup_style, mainbar_get_style() );
 
     for ( int setup = 0 ; setup < MAX_SETUP_ICON ; setup++ ) {
         // set x, y and mark it as inactive

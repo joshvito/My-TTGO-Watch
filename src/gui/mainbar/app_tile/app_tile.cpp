@@ -23,23 +23,21 @@
 
 #include "gui/mainbar/mainbar.h"
 #include "app_tile.h"
+#include "gui/theme/theme.h"
 
 lv_app_icon_t app_entry[ MAX_APPS_ICON ];
 lv_obj_t *app_cont[ MAX_APPS_TILES ];
 uint32_t app_tile_num[ MAX_APPS_TILES ];
 static lv_style_t app_style;
 
-LV_FONT_DECLARE(Ubuntu_72px);
-LV_FONT_DECLARE(Ubuntu_16px);
-
 void app_tile_setup( void ) {
+    lv_style_copy( &app_style, theme_get_style() );
 
     for ( int tiles = 0 ; tiles < MAX_APPS_TILES ; tiles++ ) {
         app_tile_num[ tiles ] = mainbar_add_tile( 1 + tiles , 0 );
         app_cont[ tiles ] = mainbar_get_tile_obj( app_tile_num[ tiles ] );
+        lv_obj_add_style(app_cont[ tiles ], LV_OBJ_PART_MAIN, &app_style );
     }
-
-    lv_style_copy( &app_style, mainbar_get_style() );
 
     for ( int app = 0 ; app < MAX_APPS_ICON ; app++ ) {
         // set x, y and mark it as inactive
