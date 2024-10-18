@@ -22,13 +22,14 @@
 #ifndef _stopwatch_APP_H
     #define _stopwatch_APP_H
 
-    #include <TTGO.h>
-
 //    #define stopwatch_WIDGET    // uncomment if an widget need
 
     void stopwatch_app_setup( void );
     void stopwatch_app_hide_app_icon_info( bool show );
     void stopwatch_app_hide_widget_icon_info( bool show );
+    void stopwatch_add_widget( void );
+    void stopwatch_remove_widget( void );
+    void stopwatch_app_update_widget_label( char *label );
     uint32_t stopwatch_app_get_app_setup_tile_num( void );
     uint32_t stopwatch_app_get_app_main_tile_num( void );
 

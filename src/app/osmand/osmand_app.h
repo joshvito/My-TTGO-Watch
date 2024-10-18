@@ -22,9 +22,7 @@
 #ifndef _OSMAND_APP_H
     #define _OSMAND_APP_H
 
-    #include <TTGO.h>
-
-//    #define EXAMPLE_WIDGET    // uncomment if an widget need
+    #
 
     void osmand_app_setup( void );
     void osmand_app_hide_app_icon_info( bool show );

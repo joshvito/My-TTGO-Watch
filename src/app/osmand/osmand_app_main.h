@@ -22,11 +22,11 @@
 #ifndef _OSMAND_APP_MAIN_H
     #define _OSMAND_APP_MAIN_H
 
-    #include <TTGO.h>
+    #
 
     struct direction_t {
-        char direction[ 48 ];
-        char direction_helper[ 48 ];
+        const char direction[ 24 ];
+        const char direction_helper[ 24 ];
         const lv_img_dsc_t *img;
     };
 

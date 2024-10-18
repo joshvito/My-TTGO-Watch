@@ -22,8 +22,15 @@
 #ifndef _BLUETOOTH_SETTINGS_H
     #define _BLUETOOTH_SETTINGS_H
 
-    #include <TTGO.h>
-
+    /**
+     * @brief system bluetooth settings setup
+     */
     void bluetooth_settings_tile_setup( void );
+    /**
+     * @brief   get the bluetooth tile number
+     * 
+     * @return  tile number
+     */
+    uint32_t bluetooth_get_setup_tile_num( void );
 
 #endif // _BLUETOOTH_SETTINGS_H

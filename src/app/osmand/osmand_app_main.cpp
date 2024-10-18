@@ -20,7 +20,6 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 #include "config.h"
-#include <TTGO.h>
 
 #include "osmand_app.h"
 #include "osmand_app_main.h"
@@ -30,166 +29,222 @@
 #include "gui/mainbar/main_tile/main_tile.h"
 #include "gui/mainbar/mainbar.h"
 #include "gui/statusbar.h"
+#include "gui/widget_factory.h"
+#include "gui/widget_styles.h"
 
 #include "hardware/display.h"
-#include "hardware/blectl.h"
-#include "hardware/json_psram_allocator.h"
+#include "hardware/ble/gadgetbridge.h"
 #include "hardware/powermgm.h"
+#include "hardware/timesync.h"
+
+#include "utils/bluejsonrequest.h"
+
+#ifdef NATIVE_64BIT
+    #include "utils/logging.h"
+    #include "utils/millis.h"
+    #include <string>
+
+    using namespace std;
+    #define String string
+#else
+    #include <Arduino.h>
+#endif
+
+lv_task_t *osmand_app_main_tile_task;
 
 lv_obj_t *osmand_app_main_tile = NULL;
 lv_style_t osmand_app_main_style;
+lv_style_t osmand_app_time_style;
 lv_style_t osmand_app_distance_style;
 
 lv_obj_t *osmand_app_direction_img = NULL;
 lv_obj_t *osmand_app_distance_label = NULL;
 lv_obj_t *osmand_app_info_label = NULL;
-
-lv_task_t * _osmand_app_task;
+lv_obj_t *osmand_app_time_label = NULL;
 
 static bool osmand_active = false;
 static bool osmand_block_return_maintile = false;
 
 LV_IMG_DECLARE(cancel_32px);
 LV_IMG_DECLARE(ahead_128px);
-LV_IMG_DECLARE(turn_left_128px);
-LV_IMG_DECLARE(turn_right_128px);
-LV_IMG_DECLARE(slightly_left_128px);
-LV_IMG_DECLARE(slightly_right_128px);
-LV_IMG_DECLARE(sharply_left_128px);
-LV_IMG_DECLARE(sharply_right_128px);
+LV_IMG_DECLARE(turnleft_128px);
+LV_IMG_DECLARE(turnright_128px);
+LV_IMG_DECLARE(slightlyleft_128px);
+LV_IMG_DECLARE(slightlyright_128px);
+LV_IMG_DECLARE(sharplyleft_128px);
+LV_IMG_DECLARE(sharplyright_128px);
 LV_FONT_DECLARE(Ubuntu_16px);
 LV_FONT_DECLARE(Ubuntu_32px);
 
-struct direction_t direction[] PROGMEM = {
+struct direction_t direction[] = {
     // english directions
     { "ahead", "", &ahead_128px },
-    { "left", "slightly", &slightly_left_128px },
-    { "right", "slightly", &slightly_right_128px },
-    { "left", "sharply", &sharply_left_128px },
-    { "right", "sharply", &sharply_right_128px },
-    { "turn left", "", &turn_left_128px },
-    { "turn right", "", &turn_right_128px },
+    { "left", "slightly", &slightlyleft_128px },
+    { "right", "slightly", &slightlyright_128px },
+    { "left", "sharply", &sharplyleft_128px },
+    { "right", "sharply", &sharplyright_128px },
+    { "turn left", "", &turnleft_128px },
+    { "turn right", "", &turnright_128px },
     // german direction
     { "Geradeaus", "", &ahead_128px },
-    { "links abbiegen", "halb", &slightly_left_128px },
-    { "rechts abbiegen", "halb", &slightly_right_128px },
-    { "links abbiegen", "scharf", &sharply_left_128px },
-    { "rechts abbiegen", "scharf", &sharply_right_128px },
-    { "links abbiegen", "", &turn_left_128px },
-    { "rechts abbiegen", "", &turn_right_128px },
+    { "links abbiegen", "halb", &slightlyleft_128px },
+    { "rechts abbiegen", "halb", &slightlyright_128px },
+    { "links abbiegen", "scharf", &sharplyleft_128px },
+    { "rechts abbiegen", "scharf", &sharplyright_128px },
+    { "links abbiegen", "", &turnleft_128px },
+    { "rechts abbiegen", "", &turnright_128px },
     // french direction
     { "Avancez", "", &ahead_128px },
-    { "gauche et continuez", "vers la", &slightly_left_128px },
-    { "droite et continuez", "vers la", &slightly_right_128px },
-    { "gauche et continuez", "franchement", &sharply_left_128px },
-    { "droite et continuez", "franchement", &sharply_right_128px },
-    { "gauche et continuez", "", &turn_left_128px },
-    { "droite et continuez", "", &turn_right_128px },
+    { "gauche et continuez", "vers la", &slightlyleft_128px },
+    { "droite et continuez", "vers la", &slightlyright_128px },
+    { "gauche et continuez", "franchement", &sharplyleft_128px },
+    { "droite et continuez", "franchement", &sharplyright_128px },
+    { "gauche et continuez", "", &turnleft_128px },
+    { "droite et continuez", "", &turnright_128px },
+        // italian direction
+    { "Avanti", "", &ahead_128px },
+    { "sinistra", "leggermente", &slightlyleft_128px },
+    { "destra", "leggermente", &slightlyright_128px },
+    { "sinistra", "bruscamente", &sharplyleft_128px },
+    { "destra", "bruscamente", &sharplyright_128px },
+    { "gira a sinistra", "", &turnleft_128px },
+    { "gira a destra", "", &turnright_128px },
     { "", "", NULL }
 };
 
+bool osmand_style_change_event_cb( EventBits_t event, void *arg );
+void osmand_app_main_tile_time_update_task( lv_task_t * task );
 static void exit_osmand_app_main_event_cb( lv_obj_t * obj, lv_event_t event );
-static void osmand_bluetooth_message_event_cb( EventBits_t event, char* msg );
-void osmand_bluetooth_message_msg_pharse( char* msg );
+bool osmand_bluetooth_message_event_cb( EventBits_t event, void *arg );
+static void osmand_bluetooth_message_msg_pharse( BluetoothJsonRequest &doc );
 const lv_img_dsc_t *osmand_find_direction_img( const char * msg );
 void osmand_activate_cb( void );
 void osmand_hibernate_cb( void );
-void osmand_app_task( lv_task_t * task );
 
 void osmand_app_main_setup( uint32_t tile_num ) {
 
     osmand_app_main_tile = mainbar_get_tile_obj( tile_num );
 
-    lv_style_copy( &osmand_app_main_style, mainbar_get_style() );
-    lv_style_set_bg_color( &osmand_app_main_style, LV_OBJ_PART_MAIN, LV_COLOR_BLACK );
-    lv_style_set_bg_opa( &osmand_app_main_style, LV_OBJ_PART_MAIN, LV_OPA_100);
-    lv_style_set_border_width( &osmand_app_main_style, LV_OBJ_PART_MAIN, 0);
+    lv_style_copy( &osmand_app_main_style, APP_STYLE );
     lv_style_set_text_font( &osmand_app_main_style, LV_STATE_DEFAULT, &Ubuntu_16px);
     lv_obj_add_style( osmand_app_main_tile, LV_OBJ_PART_MAIN, &osmand_app_main_style );
 
     lv_style_copy( &osmand_app_distance_style, &osmand_app_main_style );
     lv_style_set_text_font( &osmand_app_distance_style, LV_STATE_DEFAULT, &Ubuntu_32px);
 
-    lv_obj_t * exit_btn = lv_imgbtn_create( osmand_app_main_tile, NULL);
-    lv_imgbtn_set_src( exit_btn, LV_BTN_STATE_RELEASED, &cancel_32px);
-    lv_imgbtn_set_src( exit_btn, LV_BTN_STATE_PRESSED, &cancel_32px);
-    lv_imgbtn_set_src( exit_btn, LV_BTN_STATE_CHECKED_RELEASED, &cancel_32px);
-    lv_imgbtn_set_src( exit_btn, LV_BTN_STATE_CHECKED_PRESSED, &cancel_32px);
-    lv_obj_add_style( exit_btn, LV_IMGBTN_PART_MAIN, &osmand_app_main_style );
-    lv_obj_align( exit_btn, osmand_app_main_tile, LV_ALIGN_IN_TOP_RIGHT, -10, 10 );
-    lv_obj_set_event_cb( exit_btn, exit_osmand_app_main_event_cb );
+    lv_style_copy( &osmand_app_time_style, &osmand_app_main_style);
+    lv_style_set_text_font( &osmand_app_time_style, LV_STATE_DEFAULT, &Ubuntu_16px);
+
+    osmand_app_time_label = lv_label_create( osmand_app_main_tile , NULL);
+    lv_label_set_text(osmand_app_time_label, "00:00");
+    lv_obj_reset_style_list( osmand_app_time_label, LV_OBJ_PART_MAIN );
+    lv_obj_add_style( osmand_app_time_label, LV_OBJ_PART_MAIN, &osmand_app_time_style );
+    lv_obj_align( osmand_app_time_label, osmand_app_main_tile, LV_ALIGN_IN_TOP_MID, 0, THEME_PADDING );
+
+    lv_obj_t * exit_btn = wf_add_exit_button( osmand_app_main_tile, exit_osmand_app_main_event_cb );
+    lv_obj_align( exit_btn, osmand_app_main_tile, LV_ALIGN_IN_TOP_RIGHT, -THEME_PADDING, THEME_PADDING );
 
     osmand_app_direction_img = lv_img_create( osmand_app_main_tile, NULL );
     lv_img_set_src( osmand_app_direction_img, &ahead_128px );
-    lv_obj_align( osmand_app_direction_img, osmand_app_main_tile, LV_ALIGN_IN_TOP_MID, 0, 32 );
+    lv_obj_align( osmand_app_direction_img, osmand_app_main_tile, LV_ALIGN_CENTER, 0, 0 );
+
+    osmand_app_info_label = lv_label_create( osmand_app_main_tile, NULL);
+    lv_obj_add_style( osmand_app_info_label, LV_OBJ_PART_MAIN, &osmand_app_main_style  );
+    lv_label_set_text( osmand_app_info_label, "no bluetooth connection");
+    lv_obj_align( osmand_app_info_label, osmand_app_main_tile, LV_ALIGN_IN_BOTTOM_MID, 0, 0 );
 
     osmand_app_distance_label = lv_label_create( osmand_app_main_tile, NULL);
     lv_obj_add_style( osmand_app_distance_label, LV_OBJ_PART_MAIN, &osmand_app_distance_style  );
     lv_label_set_text( osmand_app_distance_label, "n/a");
-    lv_obj_align( osmand_app_distance_label, osmand_app_direction_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
-
-    osmand_app_info_label = lv_label_create( osmand_app_main_tile, NULL);
-    lv_obj_add_style( osmand_app_info_label, LV_OBJ_PART_MAIN, &osmand_app_main_style  );
-    lv_label_set_text( osmand_app_info_label, "wait for osmand msg");
-    lv_obj_align( osmand_app_info_label, osmand_app_distance_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
+    lv_obj_align( osmand_app_distance_label, osmand_app_info_label, LV_ALIGN_OUT_TOP_MID, 0, 0 );
 
     mainbar_add_tile_activate_cb( tile_num, osmand_activate_cb );
     mainbar_add_tile_hibernate_cb( tile_num, osmand_hibernate_cb );
 
-    blectl_register_cb( BLECTL_MSG, osmand_bluetooth_message_event_cb );
+    gadgetbridge_register_cb( GADGETBRIDGE_JSON_MSG | GADGETBRIDGE_CONNECT | GADGETBRIDGE_DISCONNECT , osmand_bluetooth_message_event_cb, "OsmAnd main" );
+    styles_register_cb( STYLE_CHANGE, osmand_style_change_event_cb, "osmand style" );
+    osmand_app_main_tile_task = lv_task_create( osmand_app_main_tile_time_update_task, 1000, LV_TASK_PRIO_MID, NULL );
+}
+
+bool osmand_style_change_event_cb( EventBits_t event, void *arg ) {
+    switch( event ) {
+        case STYLE_CHANGE:  lv_style_copy( &osmand_app_main_style, APP_STYLE );
+                            lv_style_set_text_font( &osmand_app_main_style, LV_STATE_DEFAULT, &Ubuntu_16px);
+
+                            lv_style_copy( &osmand_app_distance_style, &osmand_app_main_style );
+                            lv_style_set_text_font( &osmand_app_distance_style, LV_STATE_DEFAULT, &Ubuntu_32px);
+
+                            lv_style_copy( &osmand_app_time_style, &osmand_app_main_style);
+                            lv_style_set_text_font( &osmand_app_time_style, LV_STATE_DEFAULT, &Ubuntu_16px);        
+                            break;
+    }
+    return( true );
+}
+
+void osmand_app_main_tile_time_update_task( lv_task_t * task ) {
+    if ( osmand_active ) {
+        char time_str[64]="";
+        timesync_get_current_timestring( time_str, sizeof( time_str ) );
+        lv_label_set_text(osmand_app_time_label, time_str );
+        lv_obj_align( osmand_app_time_label, osmand_app_main_tile, LV_ALIGN_IN_TOP_MID, 0, 5 );
+    }
 }
 
 static void exit_osmand_app_main_event_cb( lv_obj_t * obj, lv_event_t event ) {
     switch( event ) {
-        case( LV_EVENT_CLICKED ):       mainbar_jump_to_maintile( LV_ANIM_OFF );
-                                        break;
+        case( LV_EVENT_CLICKED ):   
+            mainbar_jump_back();
+            break;
     }
 }
 
-static void osmand_bluetooth_message_event_cb( EventBits_t event, char* msg ) {
+bool osmand_bluetooth_message_event_cb( EventBits_t event, void *arg ) {
     switch( event ) {
-        case BLECTL_MSG:            osmand_bluetooth_message_msg_pharse( msg );
-                                    break;
+        case GADGETBRIDGE_JSON_MSG:            
+            osmand_bluetooth_message_msg_pharse( *(BluetoothJsonRequest*)arg );
+            break;
+        case GADGETBRIDGE_CONNECT:
+            lv_label_set_text( osmand_app_info_label, "wait for OsmAnd msg");
+            lv_obj_align( osmand_app_info_label, osmand_app_distance_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
+            break;
+        case GADGETBRIDGE_DISCONNECT:     
+            lv_label_set_text( osmand_app_info_label, "no bluetooth connection");
+            lv_obj_align( osmand_app_info_label, osmand_app_distance_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
+            break;
     }
+    return( true );
 }
 
-void osmand_bluetooth_message_msg_pharse( char* msg ) {
+void osmand_bluetooth_message_msg_pharse( BluetoothJsonRequest &doc ) {
     if ( osmand_active == false ) {
         return;
     }
 
-    log_i("msg: %s", msg );
-
-    SpiRamJsonDocument doc( strlen( msg ) * 2 );
-
-    DeserializationError error = deserializeJson( doc, msg );
-    if ( error ) {
-        log_e("bluetooth message deserializeJson() failed: %s", error.c_str() );
-    }
-    else  {
-        if ( doc["t"] && doc["src"] && doc["title"] ) {
-            if ( !strcmp( doc["t"], "notify" ) && !strcmp( doc["src"], "OsmAnd" ) ) {
-                if ( strstr( doc["title"], "?") ) {
-                    const char * distance = doc["title"];
-                    char * direction = strstr( doc["title"], "?");
-                    *direction = '\0';
-                    direction++;
-                    lv_img_set_src( osmand_app_direction_img, osmand_find_direction_img( (const char*)direction ) );
-                    lv_obj_align( osmand_app_direction_img, osmand_app_main_tile, LV_ALIGN_IN_TOP_MID, 0, 32 );
-                    lv_label_set_text( osmand_app_distance_label, distance );
-                    lv_obj_align( osmand_app_distance_label, osmand_app_direction_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
-                }
-                else {
-                    lv_label_set_text( osmand_app_info_label, doc["title"] );
-                    lv_obj_align( osmand_app_info_label, osmand_app_distance_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
-                }
+    if ( doc.containsKey("t") && doc.containsKey("src") && doc.containsKey("title") ) {
+        /*
+         * React to messages from "OsmAnd" and "OsmAnd~"
+         */
+        if ( !strcmp( doc["t"], "notify" ) && !strncmp( doc["src"], "OsmAnd", 6 ) ) {
+            const char * title = doc["title"]; 
+            if ( strstr( title, "?") ) {
+                const char * distance = doc["title"];
+                char * direction = (char *)strstr( title, "?");
+                *direction = '\0';
+                direction++;
+                lv_img_set_src( osmand_app_direction_img, osmand_find_direction_img( (const char*)direction ) );
+                lv_obj_align( osmand_app_direction_img, osmand_app_main_tile, LV_ALIGN_IN_TOP_MID, 0, 32 );
+                lv_label_set_text( osmand_app_distance_label, distance );
+                lv_obj_align( osmand_app_distance_label, osmand_app_direction_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
             }
-            powermgm_set_event( POWERMGM_WAKEUP_REQUEST );
+            else {
+                lv_label_set_text( osmand_app_info_label, doc["title"] );
+                lv_obj_align( osmand_app_info_label, osmand_app_distance_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
+            }
         }
-
+        powermgm_set_event( POWERMGM_WAKEUP_REQUEST );
     }
+
     lv_obj_invalidate( lv_scr_act() );
-    doc.clear();
 }
 
 const lv_img_dsc_t *osmand_find_direction_img( const char * msg ) {
@@ -207,18 +262,10 @@ void osmand_activate_cb( void ) {
     bluetooth_message_disable();
     osmand_block_return_maintile = display_get_block_return_maintile();
     display_set_block_return_maintile( true );
-    _osmand_app_task = lv_task_create(osmand_app_task, 1000,  LV_TASK_PRIO_LOWEST, NULL );
-    lv_label_set_text( osmand_app_info_label, "wait for OsmAnd msg");
-    lv_obj_align( osmand_app_info_label, osmand_app_distance_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5 );
 }
 
 void osmand_hibernate_cb( void ) {
     osmand_active = false;
     bluetooth_message_enable();
     display_set_block_return_maintile( osmand_block_return_maintile );
-    lv_task_del( _osmand_app_task );
-}
-
-void osmand_app_task( lv_task_t * task ) {
-    // put your code her
 }

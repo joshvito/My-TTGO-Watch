@@ -22,32 +22,26 @@
 #ifndef _WEATHER_H
     #define _WEATHER_H
 
-    #include <TTGO.h>
+    #include "config/weather_config.h"
 
-    #define WEATHER_CONFIG_FILE             "/weather.cfg"
-    #define WEATHER_JSON_CONFIG_FILE        "/weather.json"
+    #ifdef NATIVE_64BIT
+        #include "utils/io.h"
+        #include <time.h>
+    #else
+        #include <Arduino.h>
+    #endif
 
-    #define WEATHER_WIDGET_SYNC_REQUEST    _BV(0)
-
-    typedef struct {
-        char version = 2;
-        char apikey[64] = "";
-        char lon[16] = "";
-        char lat[16] = "";
-        bool autosync = true;
-        bool showWind = false;
-        bool imperial = false;
-    } weather_config_t;
+    #define WEATHER_SYNC_REQUEST    _BV(0)
 
     typedef struct {
         bool valide = false;
         time_t timestamp = 0;
-        char temp[8] = "";
-        char pressure[8] = "";
-        char humidity[8] = "";
+        char temp[16] = "";
+        char pressure[16] = "";
+        char humidity[16] = "";
         char name[32] = "";
-        char icon[8] = "";
-        char wind[8] = "";
+        char icon[16] = "";
+        char wind[16] = "";
     } weather_forcast_t;
 
     void weather_app_setup( void );
@@ -60,10 +54,14 @@
 
     void weather_jump_to_setup( void );
 
-    void weather_widget_sync_request( void );
+    void weather_sync_request( void );
 
     void weather_save_config( void );
 
     void weather_load_config( void );
+
+    void weather_add_widget( void );
+    
+    void weather_remove_widget( void );
     
 #endif // _WEATHER_H

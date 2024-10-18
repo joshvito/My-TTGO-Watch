@@ -20,12 +20,32 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 #ifndef _GUI_H
-
     #define _GUI_H
-
-    #include <TTGO.h>
     
+    #define BACKGROUNDIMAGE    "/spiffs/bg.png"
+    /**
+     * @brief GUI setup
+     */
     void gui_setup( void );
-    void gui_loop( TTGOClass *ttgo );
+    /**
+     * @brief set the background
+     * 
+     * @param   background_image    background image index 0...4
+     */
+    void gui_set_background_image ( uint32_t background_image);
+    /**
+     * @brief force a complete redraw cycle on next gui cycle
+     * 
+     * @param force  true for redraw
+     */
+    void gui_force_redraw( bool force );
+    /**
+     * @brief take gui control to make LVGL threas safe
+     */    
+    bool gui_take( void );
+    /**
+     * @brief take gui control to make LVGL threas safe
+     */    
+    void gui_give( void );
 
 #endif // _STATUSBAR_H

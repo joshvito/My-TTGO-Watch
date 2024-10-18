@@ -22,8 +22,15 @@
 #ifndef _DISPLAY_SETTINGS_H
     #define _DISPLAY_SETTINGS_H
 
-    #include <TTGO.h>
-
+    /**
+     * @brief system display config setup
+     */
     void display_settings_tile_setup( void );
+    /**
+     * @brief   get the display setup tile number
+     * 
+     * @return  tile number
+     */
+    uint32_t display_get_setup_tile_num( void );
 
 #endif // _DISPLAY_SETTINGS_H

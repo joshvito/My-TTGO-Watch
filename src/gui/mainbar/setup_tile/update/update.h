@@ -22,13 +22,20 @@
 #ifndef _UPDATE_H
     #define _UPDATE_H
 
-    #include <TTGO.h>
-
     #define UPDATE_REQUEST              _BV(0)
     #define UPDATE_GET_VERSION_REQUEST  _BV(1)
 
+    /**
+     * @brief system update setup
+     */
     void update_tile_setup( void );
+    /**
+     * @brief check for updates
+     */
     void update_check_version( void );
+    /**
+     * @brief start update firmware
+     */
     void update_update_firmware( void );
 
 #endif // _UPDATE_H

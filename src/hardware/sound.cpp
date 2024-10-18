@@ -1,5 +1,5 @@
 /****************************************************************************
- *   Aug 3 22:21:17 2020
+ *   Tu May 22 21:23:51 2020
  *   Copyright  2020  Dirk Brosswick
  *   Email: dirk.brosswick@googlemail.com
  ****************************************************************************/
@@ -20,73 +20,430 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 #include "config.h"
-#include "driver/i2s.h"
 
+#include "powermgm.h"
 #include "sound.h"
-#include "gui/sound/snd_start.h"
-#include "gui/sound/snd_signal.h"
+#include "timesync.h"
+#include "callback.h"
+#include "hardware/config/soundconfig.h"
 
-EventGroupHandle_t sound_event_handle = NULL;
-TaskHandle_t _sound_Task;
-void sound_Task( void * pvParameters );
+#ifdef NATIVE_64BIT
+    #include "utils/logging.h"
+#else
+    #include <SPIFFS.h>
+    /*
+    * based on https://github.com/earlephilhower/ESP8266Audio
+    */
+    #if defined( M5PAPER )
+    #elif defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        #include "TTGO.h"
+
+        #include "AudioFileSourceSPIFFS.h"
+        #include "AudioFileSourcePROGMEM.h"
+        #include "AudioFileSourceID3.h"
+        #include "AudioGeneratorMP3.h"
+        #include "AudioGeneratorWAV.h"
+        #include <AudioGeneratorMIDI.h>
+        #include "AudioOutputI2S.h"
+        #include <ESP8266SAM.h>
+
+        AudioFileSourceSPIFFS *spliffs_file;
+        AudioOutputI2S *out;
+        AudioFileSourceID3 *id3;
+
+        AudioGeneratorMP3 *mp3;
+        AudioGeneratorWAV *wav;
+        ESP8266SAM *sam;
+        AudioFileSourcePROGMEM *progmem_file;
+    #elif defined( LILYGO_WATCH_2020_V2 )
+    #elif defined( LILYGO_WATCH_2021 )    
+    #elif defined( WT32_SC01 )
+    #else
+        #warning "no hardware driver for sound"
+    #endif
+#endif
+
+bool sound_init = false;
+bool is_speaking = false;
+
+sound_config_t sound_config;
+
+callback_t *sound_callback = NULL;
+
+bool sound_powermgm_event_cb( EventBits_t event, void *arg );
+bool sound_powermgm_loop_cb( EventBits_t event, void *arg );
+bool sound_send_event_cb( EventBits_t event, void*arg );
+bool sound_is_silenced( void );
 
 void sound_setup( void ) {
+    if ( sound_init )
+        return;
 
-    esp_err_t err;
+    /*
+     * read config from SPIFFS
+     */
+    sound_config.load();
+    /*
+     * config sound driver and interface
+     */
+    #ifdef NATIVE_64BIT
 
-    i2s_config_t i2s_config = {
-        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-        .sample_rate = 8000,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-        .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1, // high interrupt priority
-        .dma_buf_count = 8,
-        .dma_buf_len = 64   //Interrupt level 1
-    };
+    #else
+        #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+            /*
+            * set sound chip voltage on V1
+            */
+            #if defined( LILYGO_WATCH_2020_V1 )
+                    TTGOClass *ttgo = TTGOClass::getWatch();
+                    ttgo->power->setLDO3Mode( AXP202_LDO3_MODE_DCIN );
+                    ttgo->power->setLDO3Voltage( 3300 );
+            #endif
+            /**
+             * set sound driver
+             */
+            out = new AudioOutputI2S();
+            out->SetPinout( TWATCH_DAC_IIS_BCK, TWATCH_DAC_IIS_WS, TWATCH_DAC_IIS_DOUT );
+            sound_set_volume_config( sound_config.volume );
+            mp3 = new AudioGeneratorMP3();
+            wav = new AudioGeneratorWAV();
+            sam = new ESP8266SAM;
+            sam->SetVoice(sam->VOICE_SAM);
+            /*
+            * register all powermgm callback functions
+            */
+            powermgm_register_cb( POWERMGM_SILENCE_WAKEUP | POWERMGM_STANDBY | POWERMGM_WAKEUP, sound_powermgm_event_cb, "powermgm sound" );
+            powermgm_register_loop_cb( POWERMGM_STANDBY | POWERMGM_SILENCE_WAKEUP | POWERMGM_WAKEUP, sound_powermgm_loop_cb, "powermgm sound loop" );
+            sound_set_enabled( sound_config.enable );
 
-    i2s_pin_config_t pin_config = {
-        .bck_io_num = TWATCH_DAC_IIS_BCK, //this is BCK pin
-        .ws_io_num = TWATCH_DAC_IIS_WS, // this is LRCK pin
-        .data_out_num = TWATCH_DAC_IIS_DOUT, // this is DATA output pin
-        .data_in_num = -1   //Not used
-    };
+            sound_send_event_cb( SOUNDCTL_ENABLED, (void *)&sound_config.enable );
+            sound_send_event_cb( SOUNDCTL_VOLUME, (void *)&sound_config.volume );
 
-    err = i2s_driver_install( I2S_PORT, &i2s_config, 0, NULL);
-    if (err != ESP_OK) { 
-        log_e("Failed installing driver: %d\r\n", err );
-        while (true);
-    }
-
-    err = i2s_set_pin( I2S_PORT, &pin_config);
-    if (err != ESP_OK) { 
-        log_e("Failed settings pin config: %d\r\n", err );
-        while (true);
-    }
-
-    sound_event_handle = xEventGroupCreate();
-
-    xTaskCreate(    sound_Task,      /* Function to implement the task */
-                    "sound Task",    /* Name of the task */
-                    2000,              /* Stack size in words */
-                    NULL,               /* Task input parameter */
-                    1,                  /* Priority of the task */
-                    &_sound_Task );  /* Task handle. */
-
+            sound_init = true;
+        #else
+            sound_set_enabled( false );
+            sound_init = false;
+        #endif
+    #endif
 }
 
-void sound_Task( void * pvParameters ) {
-    log_i("start sound task, heap: %d", ESP.getFreeHeap() );
+bool sound_get_available( void ) {
+    bool retval = false;
 
-    esp_err_t err;
-    size_t written = 0;
-    
-    err = i2s_write( I2S_PORT, start_raw, sizeof(start_raw), &written, portMAX_DELAY );
-    if (err != ESP_OK) { 
-        log_e("Failed write bytes: %d\r\n", err );
+    #ifdef NATIVE_64BIT
+    #else
+        #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+            retval = true;
+        #endif
+    #endif
+
+   return( retval );
+}
+
+bool sound_powermgm_event_cb( EventBits_t event, void *arg ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return( true );
     }
-    i2s_stop( I2S_PORT );
 
-    log_i("finish sound task, heap: %d", ESP.getFreeHeap() );
-    vTaskDelete( NULL );
+    switch( event ) {
+        case POWERMGM_STANDBY:          sound_set_enabled( false );
+                                        log_d("go standby");
+                                        break;
+        case POWERMGM_WAKEUP:           sound_set_enabled( sound_config.enable );
+                                        log_d("go wakeup");
+                                        break;
+        case POWERMGM_SILENCE_WAKEUP:   sound_set_enabled( sound_config.enable );
+                                        log_d("go wakeup");
+                                        break;
+    }
+    return( true );
+}
+
+bool sound_powermgm_loop_cb( EventBits_t event, void *arg ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return( true );
+    }
+#ifdef NATIVE_64BIT
+
+#else
+    #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        if ( sound_config.enable && sound_init ) {
+            // we call sound_set_enabled(false) to ensure the PMU stops all power
+            if ( mp3->isRunning() && !mp3->loop() ) {
+                log_d("stop playing mp3 sound");
+                mp3->stop();
+            }
+            if ( wav->isRunning() && !wav->loop() ) {
+                log_d("stop playing wav sound");
+                wav->stop(); 
+            }
+        }
+    #endif
+#endif
+    return( true );
+}
+
+bool sound_register_cb( EventBits_t event, CALLBACK_FUNC callback_func, const char *id ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return( true );
+    }
+
+    /*
+     * check if an callback table exist, if not allocate a callback table
+     */
+    if ( sound_callback == NULL ) {
+        sound_callback = callback_init( "sound" );
+        if ( sound_callback == NULL ) {
+            log_e("sound callback alloc failed");
+            while(true);
+        }
+    }
+    /*
+     * register an callback entry and return them
+     */
+    return( callback_register( sound_callback, event, callback_func, id ) );
+}
+
+bool sound_send_event_cb( EventBits_t event, void *arg ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return( true );
+    }
+    /*
+     * call all callbacks with her event mask
+     */
+    return( callback_send( sound_callback, event, arg ) );
+}
+
+/**
+ * @brief enable or disable the power output for AXP202_LDO3 or AXP202_LDO4
+ * depending on the current value of: sound_config.enable
+ */
+void sound_set_enabled( bool enabled ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+#ifdef NATIVE_64BIT
+
+#else
+    #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        if ( enabled ) {
+            /**
+             * ttgo->enableAudio() is not working
+             */
+            #if     defined( LILYGO_WATCH_2020_V1 )
+                    TTGOClass *ttgo = TTGOClass::getWatch();
+                    ttgo->power->setPowerOutPut( AXP202_LDO3, AXP202_ON );
+            #elif   defined( LILYGO_WATCH_2020_V3 )
+                    TTGOClass *ttgo = TTGOClass::getWatch();
+                    ttgo->power->setPowerOutPut( AXP202_LDO4, AXP202_ON );
+            #endif
+            delay( 50 );
+        }
+        else {
+            if ( sound_init ) {
+                if ( mp3->isRunning() ) mp3->stop();
+                if ( wav->isRunning() ) wav->stop();
+            }
+            /**
+             * ttgo->disableAudio() is not working
+             */
+            #if     defined( LILYGO_WATCH_2020_V1 )
+                    TTGOClass *ttgo = TTGOClass::getWatch();
+                    ttgo->power->setPowerOutPut( AXP202_LDO3, AXP202_OFF );
+            #elif   defined( LILYGO_WATCH_2020_V3 )
+                    TTGOClass *ttgo = TTGOClass::getWatch();
+                    ttgo->power->setPowerOutPut( AXP202_LDO4, AXP202_OFF );
+            #endif
+        }
+    #endif
+#endif
+}
+
+void sound_play_spiffs_mp3( const char *filename ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+#ifdef NATIVE_64BIT
+
+#else
+    #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        if ( sound_config.enable && sound_init && !sound_is_silenced() ) {
+            sound_set_enabled( sound_config.enable );
+            log_d("playing file %s from SPIFFS", filename);
+            spliffs_file = new AudioFileSourceSPIFFS(filename);
+            id3 = new AudioFileSourceID3(spliffs_file);
+            mp3->begin(id3, out);
+        } else {
+            log_d("Cannot play mp3, sound is disabled");
+        }
+    #endif
+#endif
+}
+
+void sound_play_progmem_wav( const void *data, uint32_t len ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+#ifdef NATIVE_64BIT
+
+#else
+    #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        if ( sound_config.enable && sound_init && !sound_is_silenced() ) {
+            sound_set_enabled( sound_config.enable );
+            log_d("playing audio (size %d) from PROGMEM ", len );
+            progmem_file = new AudioFileSourcePROGMEM( data, len );
+            wav->begin(progmem_file, out);
+        } else {
+            log_d("Cannot play wav, sound is disabled");
+        }
+    #endif
+#endif
+}
+
+void sound_speak( const char *str ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+#ifdef NATIVE_64BIT
+
+#else
+    #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        if ( sound_config.enable && sound_init && !sound_is_silenced() ) {
+            sound_set_enabled( sound_config.enable );
+            log_d("Speaking text", str);
+            is_speaking = true;
+            sam->Say(out, str);
+            is_speaking = false;
+        }
+        else {
+            log_d("Cannot speak, sound is disabled");
+        }
+    #endif
+#endif
+}
+
+void sound_save_config( void ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+
+    sound_config.save();
+}
+
+void sound_read_config( void ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+
+    sound_config.load();
+}
+
+bool sound_get_enabled_config( void ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return( false );
+    }
+
+    return sound_config.enable;
+}
+
+void sound_set_enabled_config( bool enable ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+
+    sound_config.enable = enable;
+    if ( sound_config.enable) {
+        sound_set_enabled( true );
+    }
+    else {
+        sound_set_enabled( false );
+    }
+    sound_send_event_cb( SOUNDCTL_ENABLED, (void *)&sound_config.enable ); 
+}
+
+uint8_t sound_get_volume_config( void ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return( 0 );
+    }
+
+    return( sound_config.volume );
+}
+
+void sound_set_volume_config( uint8_t volume ) {
+    /**
+     * check if sound available
+     */
+    if( !sound_get_available() ) {
+        return;
+    }
+
+    sound_config.volume = volume;
+        
+#ifdef NATIVE_64BIT
+
+#else
+    #if defined( LILYGO_WATCH_2020_V1 ) || defined( LILYGO_WATCH_2020_V3 )
+        if ( sound_config.enable && sound_init ) {
+            log_d("Setting sound volume to: %d", volume);
+            // limiting max gain to 3.5 (max gain is 4.0)
+            out->SetGain(3.5f * ( sound_config.volume / 100.0f ));
+        }
+    #endif
+#endif
+    sound_send_event_cb( SOUNDCTL_VOLUME, (void *)&sound_config.volume ); 
+}
+
+
+bool sound_is_silenced( void ) {
+    if ( !sound_config.silence_timeframe ) {
+        log_d("no silence sound timeframe");
+        return( false );
+    }
+
+    struct tm start;
+    struct tm end;
+    start.tm_hour = sound_config.silence_start_hour;
+    start.tm_min = sound_config.silence_start_minute;
+    end.tm_hour = sound_config.silence_end_hour;
+    end.tm_min = sound_config.silence_end_minute;
+
+    return timesync_is_between( start, end );
 }
